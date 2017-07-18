@@ -2,7 +2,7 @@ package cd.connect.spring.servlet;
 
 
 import com.bluetrainsoftware.common.config.PreStart;
-import nz.connect.spring.Module;
+import cd.connect.spring.Module;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;

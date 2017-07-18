@@ -1,4 +1,4 @@
-package nz.connect.spring;
+package cd.connect.spring;
 
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
