@@ -5,6 +5,7 @@ import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
+import org.springframework.context.annotation.Scope;
 import org.springframework.core.type.AnnotationMetadata;
 
 import java.util.stream.Stream;
@@ -26,7 +27,13 @@ abstract public class Module implements ImportBeanDefinitionRegistrar {
 	}
 
 	protected void register(Class<?> clazz) {
-		AbstractBeanDefinition bean = BeanDefinitionBuilder.genericBeanDefinition(clazz).setScope(BeanDefinition.SCOPE_SINGLETON).getRawBeanDefinition();
+		AbstractBeanDefinition bean;
+		if(clazz.isAnnotationPresent(Scope.class)){
+			bean = BeanDefinitionBuilder.genericBeanDefinition(clazz).setScope(clazz.getAnnotation(Scope.class).value()).getRawBeanDefinition();
+		}else{
+			bean = BeanDefinitionBuilder.genericBeanDefinition(clazz).setScope(BeanDefinition.SCOPE_SINGLETON).getRawBeanDefinition();
+		}
+
 		beanDefinitionRegistry.registerBeanDefinition(bean.getBeanClassName(), bean);
 	}
 
