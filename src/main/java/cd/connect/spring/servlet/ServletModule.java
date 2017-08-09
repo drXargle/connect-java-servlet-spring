@@ -102,27 +102,33 @@ abstract public class ServletModule extends Module {
    */
   protected void servlet(Class<? extends Servlet> clazz, boolean register, Consumer<Definition> consumer) {
     ServletDefinition reg = new ServletDefinition();
-    consumer.accept(reg);
-    reg.clazz = clazz;
+
+	  reg.clazz = clazz;
+	  reg.webServlet = reg.clazz.getAnnotation(WebServlet.class);
+
+	  if (consumer == null && reg.webServlet == null) {
+		  throw new RuntimeException("Servlet setup for registration by annotation has no WebServlet annotation");
+	  }
+
+	  // we can have both annotation & this
+	  if (consumer != null) {
+	    consumer.accept(reg);
+    }
+
     if (register) {
       register(clazz);
     }
+
     addServlet(reg);
   }
 
   protected void servlet(Class<? extends Servlet> clazz) {
-    WebServlet ws = clazz.getAnnotation(WebServlet.class);
-
-    if (ws == null) {
-      throw new RuntimeException("Servlet setup for registration by annotation has no WebServlet annotation");
-    }
-
-    ServletDefinition reg = new ServletDefinition();
-    reg.webServlet = ws;
-    reg.clazz = clazz;
-    register(clazz);
-    addServlet(reg);
+  	servlet(clazz, true, null);
   }
+
+	protected void servlet(Class<? extends Servlet> clazz, boolean register) {
+		servlet(clazz, register, null);
+	}
 
   protected void servlet(Class<? extends Servlet> clazz, Consumer<Definition> consumer) {
     servlet(clazz, true, consumer);
@@ -141,7 +147,13 @@ abstract public class ServletModule extends Module {
 		reg.servlet = servlet;
 		reg.webServlet = reg.clazz.getAnnotation(WebServlet.class);
 
-		consumer.accept(reg);
+		if (consumer == null && reg.webServlet == null) {
+			throw new RuntimeException("Servlet setup for registration by annotation has no WebServlet annotation");
+		}
+
+		if (consumer != null) {
+			consumer.accept(reg);
+		}
 
 		addServlet(reg);
 	}
