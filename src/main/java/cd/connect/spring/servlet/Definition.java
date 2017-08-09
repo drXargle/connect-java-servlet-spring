@@ -14,6 +14,7 @@ public class Definition {
 	private String name;
 	private Map<String, String> params = new HashMap<>();
 	private List<String> urls = new ArrayList<>();
+	private boolean async;
 
 	public Definition param(String key, String value) {
 		params.put(key, value);
@@ -26,6 +27,12 @@ public class Definition {
 		return this;
 	}
 
+	public Definition async(boolean val) {
+		this.async = val;
+
+		return this;
+	}
+
 	public Definition priority(int pri) {
 		this.priority = pri;
 		return this;
@@ -34,6 +41,10 @@ public class Definition {
 	public Definition name(String name) {
 		this.name = name;
 		return this;
+	}
+
+	public boolean isAsync() {
+		return async;
 	}
 
 	public int getPriority() {

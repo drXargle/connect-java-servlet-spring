@@ -1,54 +1,56 @@
 package cd.connect.spring.servlet;
 
 
-import com.bluetrainsoftware.common.config.PreStart;
 import cd.connect.spring.Module;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.context.ApplicationContext;
-import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.type.AnnotationMetadata;
 
-import javax.servlet.DispatcherType;
 import javax.servlet.Filter;
-import javax.servlet.FilterRegistration;
 import javax.servlet.Servlet;
 import javax.servlet.ServletContext;
-import javax.servlet.ServletRegistration;
 import javax.servlet.annotation.WebFilter;
-import javax.servlet.annotation.WebInitParam;
 import javax.servlet.annotation.WebServlet;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
  * @author Richard Vowles - https://plus.google.com/+RichardVowles
  */
-abstract public class ServletModule extends Module implements ApplicationContextAware {
+abstract public class ServletModule extends Module {
   private static final Logger log = LoggerFactory.getLogger(ServletModule.class);
 
-  private static class ServletDefinition extends Definition {
+  static class ServletDefinition extends Definition {
     Class<? extends Servlet> clazz;
+    Servlet servlet;
     WebServlet webServlet;
   }
 
-  private static class FilterDefinition extends Definition {
+  static class FilterDefinition extends Definition {
     Class<? extends Filter> clazz;
+    Filter filter;
     WebFilter webFilter;
   }
 
-  private static Map<Class<? extends ServletModule>, List<ServletDefinition>> servlets = new HashMap<>();
-  private static Map<Class<? extends ServletModule>, List<FilterDefinition>> filters = new HashMap<>();
-  private ServletContext servletContext;
-  private ApplicationContext applicationContext;
+  static Map<Class<? extends ServletModule>, List<ServletDefinition>> servlets = new HashMap<>();
+  // because these are not spring objects, they can't get injected anywhere, so we need to hold onto them to clean up later
+  static Map<Class<? extends ServletModule>, ServletModule> servletModules = new HashMap<>();
+  static Map<Class<? extends ServletModule>, List<FilterDefinition>> filters = new HashMap<>();
 
-  private void addFilter(FilterDefinition fd) {
+	public ServletModule() {
+		// we have to do this because Spring is creating multiple instances of this class, which
+		// is just *weird*. So we need to de-dupe it so we don't postProcess more than once.
+		servletModules.put(this.getClass(), this);
+	}
+
+	private void addFilter(FilterDefinition fd) {
     List<FilterDefinition> filterDefinitions = filters.computeIfAbsent(this.getClass(), k -> new ArrayList<>());
 
     filterDefinitions.add(fd);
@@ -88,27 +90,6 @@ abstract public class ServletModule extends Module implements ApplicationContext
     register(this.getClass());
   }
 
-  /**
-   * called when the context has been refreshed. As this is not a Spring Bean (this module) we cannot
-   * tap directly into ApplicationContextAware
-   */
-  public void setApplicationContext(ApplicationContext ctx) throws BeansException {
-    if (servletContext == null) {
-      this.servletContext = ctx.getBean(ServletContext.class);
-      this.applicationContext = ctx;
-    }
-  }
-
-  /**
-   * Here the context has been refreshed and the configuration injected, but the web app (or whatever) has not
-   * started.
-   */
-  @PreStart
-  public void preStart() {
-    postProcessFilters(servletContext, applicationContext);
-    postProcessServlets(servletContext, applicationContext);
-    postProcess(servletContext, applicationContext);
-  }
 
   protected void postProcess(ServletContext servletContext, ApplicationContext ctx) {
   }
@@ -147,57 +128,23 @@ abstract public class ServletModule extends Module implements ApplicationContext
     servlet(clazz, true, consumer);
   }
 
-  /**
-   * allow servlets to be registered AFTER the refresh happens (e.g. jersey needs this to support multiple servlets)
-   *
-   * @param servlet
-   * @param consumer
-   */
-  protected void servlet(Servlet servlet, Consumer<Definition> consumer) {
-    ServletDefinition reg = new ServletDefinition();
+	/**
+	 * allow servlets to be registered AFTER the refresh happens (e.g. jersey needs this to support multiple servlets)
+	 *
+	 * @param servlet
+	 * @param consumer
+	 */
+	protected void servlet(Servlet servlet, Consumer<Definition> consumer) {
+		ServletDefinition reg = new ServletDefinition();
 
-    reg.clazz = servlet.getClass();
-    reg.webServlet = reg.clazz.getAnnotation(WebServlet.class);
+		reg.clazz = servlet.getClass();
+		reg.servlet = servlet;
+		reg.webServlet = reg.clazz.getAnnotation(WebServlet.class);
 
-    consumer.accept(reg);
+		consumer.accept(reg);
 
-    registerServletWithServletContext(servletContext, reg, servlet);
-  }
-
-  private void postProcessServlets(ServletContext servletContext, ApplicationContext ctx) {
-    for (ServletDefinition reg : getServlets()) {
-      registerServletWithServletContext(servletContext, reg, ctx.getBean(reg.clazz));
-    }
-  }
-
-  private void registerServletWithServletContext(ServletContext servletContext, ServletDefinition reg, Servlet servlet) {
-    if (reg.webServlet != null) {
-      WebServlet ws = reg.webServlet;
-
-      String name = ws.name().length() > 0 ? ws.name() : reg.clazz.getName();
-
-      ServletRegistration.Dynamic registration = servletContext.addServlet(name, servlet);
-
-      registration.addMapping(ws.urlPatterns());
-      registration.setInitParameters(fromInitParams(ws.initParams()));
-      registration.setLoadOnStartup(ws.loadOnStartup());
-      registration.setAsyncSupported(ws.asyncSupported());
-    } else {
-      ServletRegistration.Dynamic registration =
-        servletContext.addServlet(reg.getName() == null ? reg.clazz.getName() : reg.getName(), servlet);
-
-      String[] urls = reg.getUrls().toArray(new String[0]);
-
-      registration.addMapping(urls);
-
-      log.debug("Registered {}:{} with url(s) {}", registration.getName(), reg.clazz.getName(), urls);
-
-      if (reg.getParams() != null) {
-        registration.setInitParameters(reg.getParams());
-      }
-    }
-  }
-
+		addServlet(reg);
+	}
   /**
    * Register a filter but it must have an WWebFilter annotation.
    *
@@ -237,71 +184,16 @@ abstract public class ServletModule extends Module implements ApplicationContext
     addFilter(reg);
   }
 
-  protected void filter(Filter filter, Consumer<Definition> consumer ) {
-    if (servletContext == null) {
-      throw new RuntimeException("Can only register filter objects after context is ready.");
-    }
-
-    FilterDefinition reg = new FilterDefinition();
-    consumer.accept(reg);
-    reg.clazz = filter.getClass();
-    registerFilterWithServletContext(servletContext, reg, filter);
-  }
-
   protected void filter(Class<? extends Filter> clazz, Consumer<Definition> consumer) {
     filter(clazz, true, consumer);
   }
 
-  private void postProcessFilters(ServletContext servletContext, ApplicationContext ctx) {
-    for (FilterDefinition reg : getFilters()) {
-      registerFilterWithServletContext(servletContext, reg, ctx.getBean(reg.clazz));
-    }
-  }
+	protected void filter(Filter filter, Consumer<Definition> consumer ) {
+		FilterDefinition reg = new FilterDefinition();
+		consumer.accept(reg);
+		reg.clazz = filter.getClass();
+		reg.filter = filter;
+		addFilter(reg);
+	}
 
-  private void registerFilterWithServletContext(ServletContext servletContext, FilterDefinition reg, Filter filter) {
-    if (reg.webFilter != null) {
-      WebFilter wf = reg.webFilter;
-
-      String name = wf.filterName().length() == 0 ? wf.getClass().getName() : wf.filterName();
-
-      FilterRegistration.Dynamic registration = servletContext.addFilter(name, filter);
-
-      registration.setAsyncSupported(wf.asyncSupported());
-
-      EnumSet<DispatcherType> dispatcherTypes = EnumSet.of(wf.dispatcherTypes()[0], wf.dispatcherTypes());
-
-      if (wf.urlPatterns().length != 0) {
-        registration.addMappingForUrlPatterns(dispatcherTypes, true, wf.urlPatterns());
-      } else if (wf.value().length != 0) {
-        registration.addMappingForUrlPatterns(dispatcherTypes, true, wf.value());
-      }
-
-      if (wf.servletNames().length != 0) {
-        registration.addMappingForServletNames(dispatcherTypes, true, wf.servletNames());
-      }
-
-      registration.setInitParameters(fromInitParams(wf.initParams()));
-    } else { // lets assume the rest of the Definition fields were filled in
-      FilterRegistration.Dynamic registration = servletContext.addFilter(
-        reg.getName() == null ? reg.clazz.getName() : reg.getName(), filter);
-
-      registration.addMappingForUrlPatterns(EnumSet.of(DispatcherType.REQUEST), true, reg.getUrls().toArray(new String[0]));
-
-      if (reg.getParams() != null) {
-        registration.setInitParameters(reg.getParams());
-      }
-    }
-  }
-
-  private Map<String, String> fromInitParams(WebInitParam params[]) {
-    Map<String, String> p = new HashMap<>();
-
-    if (params != null) {
-      for(WebInitParam param : params) {
-        p.put(param.name(), param.value());
-      }
-    }
-
-    return p;
-  }
 }
