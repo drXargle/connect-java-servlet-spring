@@ -52,6 +52,7 @@ public class ServletModuleManager {
 	 */
 	@PreStart
 	public void preStart() {
+		log.info("prestart called on servlet module manager. {} servlet modules.", ServletModule.servletModules.values().size());
 
 		ServletModule.servletModules.values().forEach(s -> {
 			try {
@@ -73,6 +74,8 @@ public class ServletModuleManager {
 			log.error("Unable to process filters or servlets", e);
 			throw new RuntimeException("Unable to start application, see logs.");
 		}
+
+		log.info("prestart on servlet module manager complete.");
 	}
 
 	private void postProcessServlets(ServletContext servletContext, ApplicationContext ctx) {
